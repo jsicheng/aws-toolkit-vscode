@@ -4264,7 +4264,7 @@
     },
     "devDependencies": {
         "@aws-sdk/types": "^3.13.1",
-        "@aws-toolkits/telemetry": "^1.0.184",
+        "@aws-toolkits/telemetry": "^1.0.185",
         "@aws/fully-qualified-names": "^2.1.1",
         "@cspotcode/source-map-support": "^0.8.1",
         "@sinonjs/fake-timers": "^10.0.2",
@@ -4315,6 +4315,8 @@
         "sass-loader": "^12.6.0",
         "sinon": "^14.0.0",
         "style-loader": "^3.3.1",
+        "ts-node": "^10.9.1",
+        "typescript": "^5.0.4",
         "umd-compat-loader": "^2.1.2",
         "vscode-nls-dev": "^4.0.4",
         "vue-loader": "^17.2.2",
@@ -4322,9 +4324,7 @@
         "webfont": "^11.2.26",
         "webpack": "^5.83.0",
         "webpack-cli": "^5.1.4",
-        "webpack-dev-server": "^4.15.1",
-        "typescript": "^5.0.4",
-        "ts-node": "^10.9.1"
+        "webpack-dev-server": "^4.15.1"
     },
     "dependencies": {
         "@amzn/codewhisperer-streaming": "file:../../src.gen/@amzn/codewhisperer-streaming",
