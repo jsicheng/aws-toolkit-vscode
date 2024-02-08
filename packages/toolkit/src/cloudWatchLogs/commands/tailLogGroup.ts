@@ -55,11 +55,12 @@ const localize = nls.loadMessageBundle()
 //     return logData
 // }
 
-export async function prepareDocument(uri: vscode.Uri) {
+export async function prepareDocument(uri: vscode.Uri): Promise<vscode.TextDocument> {
     try {
         const doc = await vscode.workspace.openTextDocument(uri)
         await vscode.window.showTextDocument(doc, { preview: false })
         await vscode.languages.setTextDocumentLanguage(doc, 'log')
+        return doc
     } catch (err) {
         if (CancellationError.isUserCancelled(err)) {
             throw err
@@ -112,8 +113,8 @@ export async function tailLogGroup(
         groupName: response.submenuResponse.data,
         regionName: response.submenuResponse.region,
     }
-    const uri = createURIFromArgs(logGroupInfo, {})
-    await prepareDocument(uri)
+    const uri: vscode.Uri = createURIFromArgs(logGroupInfo, {})
+    const doc: vscode.TextDocument = await prepareDocument(uri)
 
     const client = new CloudWatchLogsClient({ region: logGroupInfo.regionName })
 
@@ -124,7 +125,7 @@ export async function tailLogGroup(
 
     try {
         const response = await client.send(command)
-        handleResponseAsync(response, uri)
+        handleResponseAsync(response, doc)
     } catch (err) {
         // Pre-stream exceptions are captured here
         console.log(err)
@@ -135,19 +136,15 @@ function formatGroupArn(groupArn: string): string {
     return groupArn.endsWith(':*') ? groupArn.substring(0, groupArn.length - 2) : groupArn
 }
 
-export async function handleResponseAsync(response: StartLiveTailCommandOutput, uri: vscode.Uri) {
+export async function handleResponseAsync(response: StartLiveTailCommandOutput, doc: vscode.TextDocument) {
     try {
-        let lineNum = 0
         for await (const event of response.responseStream!) {
             const edit = new vscode.WorkspaceEdit()
             if (event.sessionStart !== undefined) {
                 console.log(event.sessionStart)
             } else if (event.sessionUpdate !== undefined) {
                 for (const logEvent of event.sessionUpdate.sessionResults!) {
-                    const date = new Date(logEvent.timestamp!)
-                    console.log('[' + date + '] ')
-                    edit.insert(uri, new vscode.Position(lineNum, 0), '[' + date + '] ' + logEvent.message + '\n')
-                    lineNum += 1
+                    edit.insert(doc.uri, new vscode.Position(doc.lineCount, 0), `${logEvent.message!}\n`)
                 }
             } else {
                 console.error('Unknown event type')
