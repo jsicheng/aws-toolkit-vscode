@@ -3370,7 +3370,7 @@
                 "title": "%AWS.command.cloudWatchLogs.tailLogGroup%",
                 "category": "%AWS.title%",
                 "enablement": "isCloud9 || !aws.isWebExtHost",
-                "icon": "$(gear)",
+                "icon": "$(zap)",
                 "cloud9": {
                     "cn": {
                         "category": "%AWS.title.cn%"

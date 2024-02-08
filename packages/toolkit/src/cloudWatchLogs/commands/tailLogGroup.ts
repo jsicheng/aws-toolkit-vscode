@@ -5,13 +5,12 @@
 
 import * as vscode from 'vscode'
 import * as nls from 'vscode-nls'
-import { CloudWatchLogsGroupInfo, filterLogEventsFromUri, CloudWatchLogsParameters } from '../registry/logDataRegistry'
+import { CloudWatchLogsGroupInfo, CloudWatchLogsParameters } from '../registry/logDataRegistry'
 import { DataQuickPickItem } from '../../shared/ui/pickerPrompter'
-import { isValidResponse, isWizardControl, Wizard, WIZARD_RETRY } from '../../shared/wizards/wizard'
-import { createURIFromArgs, msgKey } from '../cloudWatchLogsUtils'
+import { isValidResponse, isWizardControl, Wizard } from '../../shared/wizards/wizard'
+import { createURIFromArgs } from '../cloudWatchLogsUtils'
 import { DefaultCloudWatchLogsClient } from '../../shared/clients/cloudWatchLogsClient'
 import { CancellationError } from '../../shared/utilities/timeoutUtils'
-import { getLogger } from '../../shared/logger'
 import { TimeFilterResponse, TimeFilterSubmenu } from '../timeFilterSubmenu'
 import { CloudWatchLogs } from 'aws-sdk'
 import { CloudWatchLogsClient, StartLiveTailCommand, StartLiveTailCommandOutput } from '@aws-sdk/client-cloudwatch-logs'
@@ -21,7 +20,6 @@ import { truncate } from '../../shared/utilities/textUtilities'
 import { createBackButton, createExitButton, createHelpButton } from '../../shared/ui/buttons'
 import { PromptResult } from '../../shared/ui/prompter'
 import { ToolkitError } from '../../shared/errors'
-import { Messages } from '../../shared/utilities/messages'
 
 const localize = nls.loadMessageBundle()
 
@@ -54,7 +52,7 @@ export async function prepareDocument(uri: vscode.Uri): Promise<vscode.TextDocum
     try {
         const doc = await vscode.workspace.openTextDocument(uri)
         await vscode.window.showTextDocument(doc, { preview: false })
-        await vscode.languages.setTextDocumentLanguage(doc, 'log')
+        await vscode.languages.setTextDocumentLanguage(doc, 'json')
         return doc
     } catch (err) {
         if (CancellationError.isUserCancelled(err)) {
@@ -147,6 +145,29 @@ function displayStopTailingDialog(client: CloudWatchLogsClient, stopTailing: Boo
     })
 }
 
+function formatMessage(message: string) {
+    try {
+        const json = JSON.parse(message)
+        return JSON.stringify(json, null, 2)
+        // return typeof json === 'object' ?  JSON.stringify(json) : message
+    } catch (e) {
+        return message
+    }
+}
+
+function scrollTextDocument(textDocument: vscode.TextDocument) {
+    vscode.window.visibleTextEditors
+        .filter(editor => editor.document === textDocument)
+        .forEach(editor => scroll(editor))
+}
+
+function scroll(textEditor: vscode.TextEditor) {
+    const topPosition = new vscode.Position(Math.max(textEditor.document.lineCount - 2, 0), 0)
+    const bottomPosition = new vscode.Position(Math.max(textEditor.document.lineCount - 2, 0), 0)
+
+    textEditor.revealRange(new vscode.Range(topPosition, bottomPosition), vscode.TextEditorRevealType.InCenter)
+}
+
 export async function handleResponseAsync(
     response: StartLiveTailCommandOutput,
     doc: vscode.TextDocument,
@@ -163,12 +184,13 @@ export async function handleResponseAsync(
                 console.log(event.sessionStart)
             } else if (event.sessionUpdate !== undefined) {
                 for (const logEvent of event.sessionUpdate.sessionResults!) {
-                    edit.insert(doc.uri, new vscode.Position(doc.lineCount, 0), `${logEvent.message!}\n`)
+                    edit.insert(doc.uri, new vscode.Position(doc.lineCount, 0), `${formatMessage(logEvent.message!)}\n`)
                 }
             } else {
                 console.error('Unknown event type')
             }
             vscode.workspace.applyEdit(edit)
+            scrollTextDocument(doc)
         }
     } catch (err) {
         // On-stream exceptions are captured here
@@ -210,8 +232,7 @@ export class SearchPatternPrompter extends InputBoxPrompter {
         /** HACK: also maintain ad-hoc state because `wizardState` is not mutable. */
         public readonly retryState: any,
         public override readonly inputBox: InputBox,
-        protected override readonly options: ExtendedInputBoxOptions = {},
-        private noValidate: boolean
+        protected override readonly options: ExtendedInputBoxOptions = {}
     ) {
         super(inputBox, options)
         this.inputBox.validationMessage = retryState.validationMessage ? retryState.validationMessage : undefined
@@ -239,45 +260,16 @@ export class SearchPatternPrompter extends InputBoxPrompter {
             this.inputBox.busy = false
         }
     }
-
-    async validateSearchPattern(searchPattern: string, noValidate: boolean): Promise<string | undefined> {
-        if (noValidate) {
-            return undefined // Skip validation (service call) in tests.
-        }
-        getLogger().debug('cwl: validateSearchPattern: %O', searchPattern)
-        try {
-            await filterLogEventsFromUri(
-                this.logGroup,
-                {
-                    ...this.logParams,
-                    filterPattern: searchPattern,
-                    limit: 1,
-                },
-                undefined,
-                false
-            )
-        } catch (e) {
-            // Validation error. Get the progress message from the global map and cancel it.
-            const msgTimeout = await Messages.putMessage(msgKey(this.logGroup), '')
-            msgTimeout.cancel()
-
-            return (e as Error).message
-        }
-        return undefined
-    }
 }
 
 /**
  * Prompts the user for a search query, and validates it.
- *
- * @param noValidate For testing only: disable validation (which does a service call).
  */
 export function createSearchPatternPrompter(
     logGroup: CloudWatchLogsGroupInfo,
     logParams: CloudWatchLogsParameters,
     retryState: any,
-    isFirst: boolean,
-    noValidate: boolean
+    isFirst: boolean
 ): SearchPatternPrompter {
     const helpUri =
         'https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/FilterAndPatternSyntax.html#matching-terms-events'
@@ -306,7 +298,7 @@ export function createSearchPatternPrompter(
     inputBox.title = titleText
     inputBox.placeholder = placeHolderText
     inputBox.buttons = options.buttons
-    const prompter = new SearchPatternPrompter(logGroup, logParams, retryState, inputBox, {}, noValidate)
+    const prompter = new SearchPatternPrompter(logGroup, logParams, retryState, inputBox, {})
     return prompter
 }
 
@@ -358,8 +350,7 @@ export class TailLogGroupWizard extends Wizard<TailLogGroupWizardResponse> {
                     filterPattern: undefined,
                 },
                 this.retryState,
-                logGroupInfo ? true : false,
-                false
+                logGroupInfo ? true : false
             )
         })
     }
