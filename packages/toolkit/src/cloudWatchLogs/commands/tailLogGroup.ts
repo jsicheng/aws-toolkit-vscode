@@ -5,12 +5,7 @@
 
 import * as vscode from 'vscode'
 import * as nls from 'vscode-nls'
-import {
-    CloudWatchLogsGroupInfo,
-    LogDataRegistry,
-    filterLogEventsFromUri,
-    CloudWatchLogsParameters,
-} from '../registry/logDataRegistry'
+import { CloudWatchLogsGroupInfo, filterLogEventsFromUri, CloudWatchLogsParameters } from '../registry/logDataRegistry'
 import { DataQuickPickItem } from '../../shared/ui/pickerPrompter'
 import { isValidResponse, isWizardControl, Wizard, WIZARD_RETRY } from '../../shared/wizards/wizard'
 import { createURIFromArgs, msgKey } from '../cloudWatchLogsUtils'
@@ -100,7 +95,6 @@ export async function prepareDocument(uri: vscode.Uri): Promise<vscode.TextDocum
 // }
 
 export async function tailLogGroup(
-    registry: LogDataRegistry,
     source: string,
     logData?: { regionName: string; groupName: string; groupArn: string }
 ) {
@@ -117,7 +111,7 @@ export async function tailLogGroup(
     const doc: vscode.TextDocument = await prepareDocument(uri)
 
     const client = new CloudWatchLogsClient({ region: logGroupInfo.regionName })
-
+    const stopTailing = new Boolean(false)
     const command = new StartLiveTailCommand({
         logGroupIdentifiers: [formatGroupArn(logData?.groupArn!)],
         logEventFilterPattern: response.filterPattern,
@@ -125,7 +119,8 @@ export async function tailLogGroup(
 
     try {
         const response = await client.send(command)
-        handleResponseAsync(response, doc)
+        handleResponseAsync(response, doc, stopTailing)
+        displayStopTailingDialog(client, stopTailing)
     } catch (err) {
         // Pre-stream exceptions are captured here
         console.log(err)
@@ -136,9 +131,33 @@ function formatGroupArn(groupArn: string): string {
     return groupArn.endsWith(':*') ? groupArn.substring(0, groupArn.length - 2) : groupArn
 }
 
-export async function handleResponseAsync(response: StartLiveTailCommandOutput, doc: vscode.TextDocument) {
+function modifyVar(obj: any, val: any) {
+    obj.valueOf =
+        obj.toSource =
+        obj.toString =
+            function () {
+                return val
+            }
+}
+
+function displayStopTailingDialog(client: CloudWatchLogsClient, stopTailing: Boolean) {
+    return vscode.window.showInformationMessage('Tailing...', 'Stop').then(_ => {
+        modifyVar(stopTailing, true)
+        client.destroy()
+    })
+}
+
+export async function handleResponseAsync(
+    response: StartLiveTailCommandOutput,
+    doc: vscode.TextDocument,
+    stopTailing: Boolean
+) {
     try {
         for await (const event of response.responseStream!) {
+            console.log(stopTailing)
+            if (stopTailing.valueOf()) {
+                break
+            }
             const edit = new vscode.WorkspaceEdit()
             if (event.sessionStart !== undefined) {
                 console.log(event.sessionStart)
@@ -212,14 +231,9 @@ export class SearchPatternPrompter extends InputBoxPrompter {
                 return rv
             }
 
-            const validationResult = await this.validateSearchPattern(this.inputBox.value, this.noValidate)
             // HACK: maintain our own state and restore it.
             this.retryState.searchPattern = isValidResponse(rv) ? rv : undefined
-            this.retryState.validationMessage = validationResult
 
-            if (validationResult !== undefined) {
-                return WIZARD_RETRY
-            }
             return this.inputBox.value
         } finally {
             this.inputBox.busy = false

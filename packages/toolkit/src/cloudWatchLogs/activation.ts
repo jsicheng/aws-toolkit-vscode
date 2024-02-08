@@ -94,7 +94,7 @@ export async function activate(context: vscode.ExtensionContext, configuration: 
                     ? { regionName: node.regionCode, groupName: node.logGroup.logGroupName!, groupArn: node.arn }
                     : undefined
             const source = node ? (logGroupInfo ? 'ExplorerLogGroupNode' : 'ExplorerServiceNode') : 'Command'
-            await tailLogGroup(registry, source, logGroupInfo)
+            await tailLogGroup(source, logGroupInfo)
         }),
 
         Commands.register('aws.cwl.changeFilterPattern', async () => changeLogSearchParams(registry, 'filterPattern')),
