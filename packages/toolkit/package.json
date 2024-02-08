@@ -4276,7 +4276,7 @@
         "lint": "ts-node ./scripts/lint/testLint.ts && npm run format",
         "package": "ts-node ./scripts/build/package.ts",
         "install-plugin": "vsce package -o aws-toolkit-vscode-test.vsix && code --install-extension aws-toolkit-vscode-test.vsix",
-        "generateClients": "npm run build -w @amzn/codewhisperer-streaming && ts-node ./scripts/build/generateServiceClient.ts ",
+        "generateClients": "ts-node ./scripts/build/generateServiceClient.ts ",
         "generatePackage": "ts-node ./scripts/build/generateIcons.ts",
         "generateTelemetry": "node ../../node_modules/@aws-toolkits/telemetry/lib/generateTelemetry.js --extraInput=src/shared/telemetry/vscodeTelemetry.json --output=src/shared/telemetry/telemetry.gen.ts",
         "generateNonCodeFiles": "ts-node ./scripts/build/generateNonCodeFiles.ts",
