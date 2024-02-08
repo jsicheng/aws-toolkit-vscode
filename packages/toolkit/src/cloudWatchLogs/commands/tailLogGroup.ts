@@ -119,6 +119,7 @@ export async function tailLogGroup(
 
     const command = new StartLiveTailCommand({
         logGroupIdentifiers: [formatGroupArn(logData?.groupArn!)],
+        logEventFilterPattern: response.filterPattern,
     })
 
     try {
