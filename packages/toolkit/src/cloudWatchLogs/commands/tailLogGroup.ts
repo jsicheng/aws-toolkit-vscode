@@ -117,7 +117,7 @@ export async function tailLogGroup(
     try {
         const res = await client.send(command)
         handleResponseAsync(res, textDocument, stopTailing, response.filterPattern)
-        displayStopTailingDialog(client, stopTailing)
+        displayStopTailingDialog(client, logData!.groupName, stopTailing)
     } catch (err) {
         // Pre-stream exceptions are captured here
         console.log(err)
@@ -137,8 +137,8 @@ function modifyVar(obj: any, val: any) {
             }
 }
 
-function displayStopTailingDialog(client: CloudWatchLogsClient, stopTailing: Boolean) {
-    return vscode.window.showInformationMessage('Tailing...', 'Stop').then(_ => {
+function displayStopTailingDialog(client: CloudWatchLogsClient, logGroupName: string, stopTailing: Boolean) {
+    return vscode.window.showInformationMessage(`Tailing LogGroup: ${logGroupName}...`, 'Stop Tailing').then(_ => {
         modifyVar(stopTailing, true)
         client.destroy()
     })
