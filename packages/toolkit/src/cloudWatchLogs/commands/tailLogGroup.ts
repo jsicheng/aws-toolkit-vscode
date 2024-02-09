@@ -115,8 +115,8 @@ export async function tailLogGroup(
     })
 
     try {
-        const response = await client.send(command)
-        handleResponseAsync(response, textDocument, stopTailing)
+        const res = await client.send(command)
+        handleResponseAsync(res, textDocument, stopTailing, response.filterPattern)
         displayStopTailingDialog(client, stopTailing)
     } catch (err) {
         // Pre-stream exceptions are captured here
@@ -168,6 +168,24 @@ function updateDocumentLanguage(textDocument: vscode.TextDocument, isJson: boole
     vscode.languages.setTextDocumentLanguage(textDocument, isJson ? 'json' : 'log')
 }
 
+function highlightTextDocument(textDocument: vscode.TextDocument, pattern: string) {
+    const decorationType = vscode.window.createTextEditorDecorationType({
+        color: new vscode.ThemeColor('terminal.ansiRed'),
+    })
+    const ranges: vscode.Range[] = []
+    const regExp = new RegExp(pattern, 'gu')
+    const editor = vscode.window.visibleTextEditors.find(editor => editor.document === textDocument)
+    for (let line = 0; line < textDocument.lineCount; line++) {
+        for (const match of textDocument.lineAt(line).text.matchAll(regExp)) {
+            if (match.index === undefined || match[0].length === 0) {
+                continue
+            }
+            ranges.push(new vscode.Range(line, match.index, line, match.index + match[0].length))
+            editor!.setDecorations(decorationType, ranges)
+        }
+    }
+}
+
 function scrollTextDocument(textDocument: vscode.TextDocument) {
     vscode.window.visibleTextEditors
         .filter(editor => editor.document === textDocument)
@@ -184,12 +202,12 @@ function scroll(textEditor: vscode.TextEditor) {
 export async function handleResponseAsync(
     response: StartLiveTailCommandOutput,
     textDocument: vscode.TextDocument,
-    stopTailing: Boolean
+    stopTailing: Boolean,
+    pattern: string
 ) {
     try {
-        var isJson = true
+        let isJson = true
         for await (const event of response.responseStream!) {
-            console.log(stopTailing)
             if (stopTailing.valueOf()) {
                 break
             }
@@ -197,7 +215,7 @@ export async function handleResponseAsync(
             if (event.sessionStart !== undefined) {
                 console.log(event.sessionStart)
             } else if (event.sessionUpdate !== undefined) {
-                var isFirstEvent = true
+                let isFirstEvent = true
                 for (const logEvent of event.sessionUpdate.sessionResults!) {
                     if (isFirstEvent) {
                         isJson = isMessageJson(logEvent.message!)
@@ -214,6 +232,9 @@ export async function handleResponseAsync(
             }
             updateDocumentLanguage(textDocument, isJson)
             vscode.workspace.applyEdit(edit)
+            if (pattern) {
+                highlightTextDocument(textDocument, pattern)
+            }
             scrollTextDocument(textDocument)
         }
     } catch (err) {
