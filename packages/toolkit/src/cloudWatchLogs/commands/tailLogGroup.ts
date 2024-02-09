@@ -11,7 +11,6 @@ import { isValidResponse, isWizardControl, Wizard } from '../../shared/wizards/w
 import { createURIFromArgs } from '../cloudWatchLogsUtils'
 import { DefaultCloudWatchLogsClient } from '../../shared/clients/cloudWatchLogsClient'
 import { CancellationError } from '../../shared/utilities/timeoutUtils'
-import { TimeFilterResponse, TimeFilterSubmenu } from '../timeFilterSubmenu'
 import { CloudWatchLogs } from 'aws-sdk'
 import { CloudWatchLogsClient, StartLiveTailCommand, StartLiveTailCommandOutput } from '@aws-sdk/client-cloudwatch-logs'
 import { ExtendedInputBoxOptions, InputBox, InputBoxPrompter } from '../../shared/ui/inputPrompter'
@@ -50,10 +49,10 @@ const localize = nls.loadMessageBundle()
 
 export async function prepareDocument(uri: vscode.Uri): Promise<vscode.TextDocument> {
     try {
-        const doc = await vscode.workspace.openTextDocument(uri)
-        await vscode.window.showTextDocument(doc, { preview: false })
-        await vscode.languages.setTextDocumentLanguage(doc, 'json')
-        return doc
+        const textDocument = await vscode.workspace.openTextDocument(uri)
+        await vscode.window.showTextDocument(textDocument, { preview: false })
+        vscode.languages.setTextDocumentLanguage(textDocument, 'json')
+        return textDocument
     } catch (err) {
         if (CancellationError.isUserCancelled(err)) {
             throw err
@@ -106,7 +105,7 @@ export async function tailLogGroup(
         regionName: response.submenuResponse.region,
     }
     const uri: vscode.Uri = createURIFromArgs(logGroupInfo, {})
-    const doc: vscode.TextDocument = await prepareDocument(uri)
+    const textDocument: vscode.TextDocument = await prepareDocument(uri)
 
     const client = new CloudWatchLogsClient({ region: logGroupInfo.regionName })
     const stopTailing = new Boolean(false)
@@ -117,7 +116,7 @@ export async function tailLogGroup(
 
     try {
         const response = await client.send(command)
-        handleResponseAsync(response, doc, stopTailing)
+        handleResponseAsync(response, textDocument, stopTailing)
         displayStopTailingDialog(client, stopTailing)
     } catch (err) {
         // Pre-stream exceptions are captured here
@@ -145,14 +144,28 @@ function displayStopTailingDialog(client: CloudWatchLogsClient, stopTailing: Boo
     })
 }
 
+function isMessageJson(message: string) {
+    try {
+        const json = JSON.parse(message)
+        return json ? true : false
+        // return typeof json === 'object' ?  JSON.stringify(json) : message
+    } catch (e) {
+        return false
+    }
+}
+
 function formatMessage(message: string) {
     try {
         const json = JSON.parse(message)
-        return JSON.stringify(json, null, 2)
+        return json ? `${JSON.stringify(json, null, 2)},` : message
         // return typeof json === 'object' ?  JSON.stringify(json) : message
     } catch (e) {
         return message
     }
+}
+
+function updateDocumentLanguage(textDocument: vscode.TextDocument, isJson: boolean) {
+    vscode.languages.setTextDocumentLanguage(textDocument, isJson ? 'json' : 'log')
 }
 
 function scrollTextDocument(textDocument: vscode.TextDocument) {
@@ -170,10 +183,11 @@ function scroll(textEditor: vscode.TextEditor) {
 
 export async function handleResponseAsync(
     response: StartLiveTailCommandOutput,
-    doc: vscode.TextDocument,
+    textDocument: vscode.TextDocument,
     stopTailing: Boolean
 ) {
     try {
+        var isJson = true
         for await (const event of response.responseStream!) {
             console.log(stopTailing)
             if (stopTailing.valueOf()) {
@@ -183,14 +197,24 @@ export async function handleResponseAsync(
             if (event.sessionStart !== undefined) {
                 console.log(event.sessionStart)
             } else if (event.sessionUpdate !== undefined) {
+                var isFirstEvent = true
                 for (const logEvent of event.sessionUpdate.sessionResults!) {
-                    edit.insert(doc.uri, new vscode.Position(doc.lineCount, 0), `${formatMessage(logEvent.message!)}\n`)
+                    if (isFirstEvent) {
+                        isJson = isMessageJson(logEvent.message!)
+                        isFirstEvent = false
+                    }
+                    edit.insert(
+                        textDocument.uri,
+                        new vscode.Position(textDocument.lineCount, 0),
+                        `${formatMessage(logEvent.message!)}\n`
+                    )
                 }
             } else {
                 console.error('Unknown event type')
             }
+            updateDocumentLanguage(textDocument, isJson)
             vscode.workspace.applyEdit(edit)
-            scrollTextDocument(doc)
+            scrollTextDocument(textDocument)
         }
     } catch (err) {
         // On-stream exceptions are captured here
@@ -314,7 +338,6 @@ export function createRegionSubmenu() {
 export interface TailLogGroupWizardResponse {
     submenuResponse: RegionSubmenuResponse<string>
     filterPattern: string
-    timeRange: TimeFilterResponse
 }
 
 export class TailLogGroupWizard extends Wizard<TailLogGroupWizardResponse> {
@@ -334,7 +357,6 @@ export class TailLogGroupWizard extends Wizard<TailLogGroupWizardResponse> {
         })
 
         this.form.submenuResponse.bindPrompter(createRegionSubmenu)
-        this.form.timeRange.bindPrompter(() => new TimeFilterSubmenu())
         this.form.filterPattern.bindPrompter(state => {
             if (!state.submenuResponse) {
                 throw Error('state.submenuResponse is null')
@@ -345,8 +367,6 @@ export class TailLogGroupWizard extends Wizard<TailLogGroupWizardResponse> {
                     regionName: state.submenuResponse.region,
                 },
                 {
-                    startTime: state.timeRange?.start,
-                    endTime: state.timeRange?.end,
                     filterPattern: undefined,
                 },
                 this.retryState,
