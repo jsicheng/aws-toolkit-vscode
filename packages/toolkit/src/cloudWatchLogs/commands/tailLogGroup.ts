@@ -19,33 +19,9 @@ import { truncate } from '../../shared/utilities/textUtilities'
 import { createBackButton, createExitButton, createHelpButton } from '../../shared/ui/buttons'
 import { PromptResult } from '../../shared/ui/prompter'
 import { ToolkitError } from '../../shared/errors'
+import {} from '@aws-sdk/client-cloudwatch-logs'
 
 const localize = nls.loadMessageBundle()
-
-// function handleWizardResponse(response: TailLogGroupWizardResponse, registry: LogDataRegistry): CloudWatchLogsData {
-//     const logGroupInfo: CloudWatchLogsGroupInfo = {
-//         groupName: response.submenuResponse.data,
-//         regionName: response.submenuResponse.region,
-//     }
-//     let parameters: CloudWatchLogsParameters
-
-//     if (response.timeRange.start === response.timeRange.end) {
-//         // this means no time filter.
-//         parameters = {
-//             limit: limitParam,
-//             filterPattern: response.filterPattern,
-//         }
-//     } else {
-//         parameters = {
-//             limit: limitParam,
-//             filterPattern: response.filterPattern,
-//             startTime: response.timeRange.start,
-//             endTime: response.timeRange.end,
-//         }
-//     }
-
-//     return logData
-// }
 
 export async function prepareDocument(uri: vscode.Uri): Promise<vscode.TextDocument> {
     try {
@@ -65,32 +41,6 @@ export async function prepareDocument(uri: vscode.Uri): Promise<vscode.TextDocum
     }
 }
 
-// /**
-//  * "Search Log Group" command
-//  *
-//  * @param registry
-//  * @param source Telemetry "source" name
-//  * @param logData
-//  */
-// export async function searchLogGroup(
-//     registry: LogDataRegistry,
-//     source: string,
-//     logData?: { regionName: string; groupName: string }
-// ): Promise<void> {
-//     await telemetry.cloudwatchlogs_open.run(async span => {
-//         const wizard = new SearchLogGroupWizard(logData)
-//         span.record({ cloudWatchResourceType: 'logGroup', source: source })
-//         const response = await wizard.run()
-//         if (!response) {
-//             throw new CancellationError('user')
-//         }
-
-//         const userResponse = handleWizardResponse(response, registry)
-//         const uri = createURIFromArgs(userResponse.logGroupInfo, userResponse.parameters)
-//         await prepareDocument(uri, userResponse, registry)
-//     })
-// }
-
 export async function tailLogGroup(
     source: string,
     logData?: { regionName: string; groupName: string; groupArn: string }
@@ -107,8 +57,8 @@ export async function tailLogGroup(
     const uri: vscode.Uri = createURIFromArgs(logGroupInfo, {})
     const textDocument: vscode.TextDocument = await prepareDocument(uri)
 
-    const client = new CloudWatchLogsClient({ region: logGroupInfo.regionName })
-    const stopTailing = new Boolean(false)
+    const client = new CloudWatchLogsClient()
+
     const command = new StartLiveTailCommand({
         logGroupIdentifiers: [formatGroupArn(logData?.groupArn!)],
         logEventFilterPattern: response.filterPattern,
@@ -116,8 +66,8 @@ export async function tailLogGroup(
 
     try {
         const res = await client.send(command)
-        handleResponseAsync(res, textDocument, stopTailing, response.filterPattern)
-        displayStopTailingDialog(client, logData!.groupName, stopTailing)
+        displayStopTailingDialog(client)
+        handleResponseAsync(res, textDocument, response.filterPattern)
     } catch (err) {
         // Pre-stream exceptions are captured here
         console.log(err)
@@ -128,19 +78,13 @@ function formatGroupArn(groupArn: string): string {
     return groupArn.endsWith(':*') ? groupArn.substring(0, groupArn.length - 2) : groupArn
 }
 
-function modifyVar(obj: any, val: any) {
-    obj.valueOf =
-        obj.toSource =
-        obj.toString =
-            function () {
-                return val
-            }
-}
-
-function displayStopTailingDialog(client: CloudWatchLogsClient, logGroupName: string, stopTailing: Boolean) {
-    return vscode.window.showInformationMessage(`Tailing LogGroup: ${logGroupName}...`, 'Stop Tailing').then(_ => {
-        modifyVar(stopTailing, true)
-        client.destroy()
+function displayStopTailingDialog(client: CloudWatchLogsClient) {
+    return vscode.window.showInformationMessage('Tailing...', 'Stop Tailing').then(_ => {
+        try {
+            client.destroy()
+        } catch (e) {
+            console.log('[EXCEPTION]', e)
+        }
     })
 }
 
@@ -148,7 +92,6 @@ function isMessageJson(message: string) {
     try {
         const json = JSON.parse(message)
         return json ? true : false
-        // return typeof json === 'object' ?  JSON.stringify(json) : message
     } catch (e) {
         return false
     }
@@ -158,7 +101,6 @@ function formatMessage(message: string) {
     try {
         const json = JSON.parse(message)
         return json ? `${JSON.stringify(json, null, 2)},` : message
-        // return typeof json === 'object' ?  JSON.stringify(json) : message
     } catch (e) {
         return message
     }
@@ -202,15 +144,11 @@ function scroll(textEditor: vscode.TextEditor) {
 export async function handleResponseAsync(
     response: StartLiveTailCommandOutput,
     textDocument: vscode.TextDocument,
-    stopTailing: Boolean,
     pattern: string
 ) {
     try {
         let isJson = true
         for await (const event of response.responseStream!) {
-            if (stopTailing.valueOf()) {
-                break
-            }
             const edit = new vscode.WorkspaceEdit()
             if (event.sessionStart !== undefined) {
                 console.log(event.sessionStart)
